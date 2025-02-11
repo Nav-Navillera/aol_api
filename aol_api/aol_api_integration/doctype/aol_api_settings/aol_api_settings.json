@@ -1,0 +1,169 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-01-24 11:58:59.279309",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "api_token_section",
+  "app_name",
+  "app_key",
+  "signature_secret",
+  "column_break_jlog",
+  "api_token",
+  "app_details_section",
+  "client_id",
+  "client_secret",
+  "website_url",
+  "column_break_naqg",
+  "oauth_callback_url",
+  "scope",
+  "session_section",
+  "access_code_details_column",
+  "access_code",
+  "access_code_request_date",
+  "column_break_lfrb",
+  "webhook_request_date",
+  "renew_automatically",
+  "column_break_idus",
+  "session_code"
+ ],
+ "fields": [
+  {
+   "fieldname": "app_name",
+   "fieldtype": "Data",
+   "label": "App Name"
+  },
+  {
+   "fieldname": "client_id",
+   "fieldtype": "Data",
+   "label": "Client ID"
+  },
+  {
+   "fieldname": "client_secret",
+   "fieldtype": "Data",
+   "label": "Client Secret"
+  },
+  {
+   "fieldname": "column_break_naqg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Isi dengan URL OAuth Callback yang digunakan sudah didaftarkan pada setting Aplikasi di Area Developer. Contoh: https://example.com/aol-oauth-callback",
+   "fieldname": "oauth_callback_url",
+   "fieldtype": "Data",
+   "label": "Oauth Callback URL"
+  },
+  {
+   "fieldname": "website_url",
+   "fieldtype": "Data",
+   "label": "Website URL"
+  },
+  {
+   "description": "Isi dengan scope sesuai dengan akses data yang ingin diharapkan. Setiap scope dipisahkan dengan spasi. Contoh item_view item_save sales_invoice_view",
+   "fieldname": "scope",
+   "fieldtype": "Small Text",
+   "label": "Scope"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "app_details_section",
+   "fieldtype": "Section Break",
+   "label": "Oautth"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "session_section",
+   "fieldtype": "Section Break",
+   "label": "Session"
+  },
+  {
+   "fieldname": "access_code_details_column",
+   "fieldtype": "Column Break",
+   "label": "Access Details"
+  },
+  {
+   "fieldname": "access_code",
+   "fieldtype": "Data",
+   "label": "Access Code"
+  },
+  {
+   "fieldname": "access_code_request_date",
+   "fieldtype": "Date",
+   "label": "Access Code Request Date"
+  },
+  {
+   "fieldname": "column_break_lfrb",
+   "fieldtype": "Column Break",
+   "label": "Webhook Details"
+  },
+  {
+   "fieldname": "column_break_idus",
+   "fieldtype": "Column Break",
+   "label": "DB Session"
+  },
+  {
+   "fieldname": "webhook_request_date",
+   "fieldtype": "Date",
+   "label": "Webhook Request Date"
+  },
+  {
+   "default": "0",
+   "fieldname": "renew_automatically",
+   "fieldtype": "Check",
+   "label": "Renew Automatically"
+  },
+  {
+   "fieldname": "session_code",
+   "fieldtype": "Data",
+   "label": "Session Code"
+  },
+  {
+   "fieldname": "api_token_section",
+   "fieldtype": "Section Break",
+   "label": "API Token"
+  },
+  {
+   "fieldname": "app_key",
+   "fieldtype": "Data",
+   "label": "App Key"
+  },
+  {
+   "fieldname": "signature_secret",
+   "fieldtype": "Data",
+   "label": "Signature Secret"
+  },
+  {
+   "fieldname": "column_break_jlog",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "api_token",
+   "fieldtype": "Text",
+   "label": "API Token"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-01-25 00:14:44.685298",
+ "modified_by": "Administrator",
+ "module": "AOL API Integration",
+ "name": "AOL API Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

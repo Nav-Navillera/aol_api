@@ -1,0 +1,71 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-01-28 07:32:22.207919",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "name1",
+  "column_break_yegt",
+  "json_path",
+  "column_break_ekdk",
+  "extracted_value",
+  "column_break_jlju",
+  "field_target"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "name1",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name"
+  },
+  {
+   "fieldname": "column_break_yegt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 4,
+   "fieldname": "json_path",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "JSON path"
+  },
+  {
+   "fieldname": "column_break_ekdk",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 2,
+   "fieldname": "extracted_value",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Extracted Value"
+  },
+  {
+   "fieldname": "column_break_jlju",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 2,
+   "fieldname": "field_target",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Field Target"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-01-28 07:34:32.898772",
+ "modified_by": "Administrator",
+ "module": "AOL API Integration",
+ "name": "Data Retrieval Fields",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

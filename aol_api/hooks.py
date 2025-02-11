@@ -133,23 +133,23 @@ app_license = "mit"
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
+scheduler_events = {
 # 	"all": [
 # 		"aol_api.tasks.all"
 # 	],
 # 	"daily": [
 # 		"aol_api.tasks.daily"
 # 	],
-# 	"hourly": [
-# 		"aol_api.tasks.hourly"
-# 	],
+ 	"hourly": [
+ 		"aol_api.webhook.sync_webhook"
+ 	],
 # 	"weekly": [
 # 		"aol_api.tasks.weekly"
 # 	],
 # 	"monthly": [
 # 		"aol_api.tasks.monthly"
 # 	],
-# }
+}
 
 # Testing
 # -------

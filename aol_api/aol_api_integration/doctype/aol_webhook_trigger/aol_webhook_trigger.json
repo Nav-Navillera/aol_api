@@ -1,0 +1,47 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-02-11 15:28:58.787908",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "method_name",
+  "column_break_wazh",
+  "method"
+ ],
+ "fields": [
+  {
+   "fieldname": "column_break_wazh",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "method_name.method_path",
+   "fieldname": "method",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Method",
+   "reqd": 1
+  },
+  {
+   "fieldname": "method_name",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Method Name",
+   "options": "AOL Webhook Function",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-02-11 15:35:37.955973",
+ "modified_by": "Administrator",
+ "module": "AOL API Integration",
+ "name": "AOL Webhook Trigger",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
