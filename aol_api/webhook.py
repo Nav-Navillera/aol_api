@@ -61,7 +61,7 @@ def get_webhook_sync_ranges():
 
 def generate_webhook_hash(uuid, timestamp):
     """Buat hash unik 16 karakter dari SHA-1."""
-    return hashlib.sha1(f"{uuid}|{timestamp}".encode()).hexdigest()[:16]
+    return hashlib.sha1(f"{uuid}|{timestamp}".encode()).hexdigest()[:21]
 
 def generate_headers(api_token, signature_secret):
     """
@@ -144,17 +144,20 @@ def save_webhook_response(json_data):
     Returns:
         None
     """
-
+    
     # Pastikan JSON memiliki elemen
-    if not json_data or not isinstance(json_data, list):
+    if not json_data:
         log_error("JSON data kosong atau tidak valid", "Format Error")
         return
 
     # Ambil nilai dari elemen pertama JSON
-    first_entry = json_data[0]  
+    first_entry = json_data
     database_id = first_entry.get("databaseId")
     document_type = first_entry.get("type")
-    send_timestamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y/%m/%d %H:%M:%S")
+    
+    timestamp_dt = datetime.strptime(first_entry["timestamp"], "%d/%m/%Y %H:%M:%S")
+    send_timestamp = timestamp_dt.strftime("%Y/%m/%d %H:%M:%S")
+    
     uuid = first_entry.get("uuid")
 
     # Pastikan key 'data' ada dan tidak kosong
@@ -261,7 +264,7 @@ def process_webhook_sync(host, headers):
     Setelah mendapatkan data, periksa hash code, dan simpan jika belum ada.
     """
     sync_ranges = get_webhook_sync_ranges()
-
+    new_data_counter = 0
     for start_time, end_time in sync_ranges:
         # Format datetime sesuai "DD/MM/YYYY HH:MM:SS"
         from_time = start_time.strftime("%d/%m/%Y %H:%M:%S")
@@ -272,47 +275,67 @@ def process_webhook_sync(host, headers):
             response = get_webhook_history(host, headers, from_time=from_time, to_time=to_time)
 
             if not response or "d" not in response:
-                frappe.logger("webhook").warning(f"Tidak ada data webhook dalam rentang {from_time} - {to_time}")
+                frappe.throw(f"Tidak ada data webhook dalam rentang {from_time} - {to_time}")
                 continue
 
             # Loop setiap payload yang diterima
             for entry in response["d"]:
                 for payload in entry.get("payload", []):
+                    frappe.logger("webhook").info(payload)
                     try:
                         # Buat hash unik untuk payload
-                        hash_code = generate_hash(payload["uuid"], payload["timestamp"])
-
+                        hash_code = generate_webhook_hash(payload["uuid"], payload["timestamp"])
+                        
                         # Cek apakah hash sudah ada di Doctype
                         if not frappe.db.exists("AOL Webhook Responses", {"hash": hash_code}):
                             # Simpan data jika hash belum ada
-                            save_webhook_response([payload])
+                            save_webhook_response(payload)
                             frappe.logger("webhook").info(f"Webhook baru disimpan, hash: {hash_code}")
+                            new_data_counter += 1
                         else:
                             frappe.logger("webhook").info(f"Webhook duplikat ditemukan, lewati hash: {hash_code}")
 
                     except Exception as e:
                         frappe.logger("webhook").error(f"Kesalahan saat memproses payload: {str(e)}")
 
+            return new_data_counter
         except Exception as e:
             frappe.logger("webhook").critical(f"Gagal mengambil histori webhook dari {from_time} - {to_time}: {str(e)}")
-        
+            frappe.throw(f"Gagal mengambil histori webhook dari {from_time} - {to_time}: {str(e)}")
+            
 @frappe.whitelist()
 def sync_webhook():
-    api_token, signature_secret = get_api_token()
-    
-    if not api_token or not signature_secret:
-        frappe.throw("API Token atau Signature Secret belum diatur.")
+    """
+    Fungsi ini digunakan sebagai trigger untuk melakukan sinkronisasi webhook.
+    Mengambil API token, signature secret, dan menjalankan proses webhook sync.
+    """
+    try:
+        # Ambil API token & signature secret
+        api_token, signature_secret = get_api_token()
 
-    # Generate Headers
-    headers = generate_headers(api_token, signature_secret)
+        if not api_token or not signature_secret:
+            frappe.throw("API Token atau Signature Secret belum diatur.")
 
-    # Dapatkan Host API
-    # host = get_host_from_api_token(headers)
-    host = "https://account.accurate.id/"
-    
-    process_webhook_sync(host, headers)
-    
-    frappe.throw(f"""history: {webhook_history["d"]}""")
+        try:
+            # Generate Headers
+            headers = generate_headers(api_token, signature_secret)
+
+            # Dapatkan Host API
+            host = "https://account.accurate.id/"
+
+            # Proses sinkronisasi webhook
+            data_counter = process_webhook_sync(host, headers)
+            
+            # frappe.throw(f"""Selesai, didapat {data_counter} baris history""")
+
+        except Exception as e:
+            frappe.logger("webhook").error(f"Gagal memproses webhook: {str(e)}")
+            frappe.throw("Terjadi kesalahan saat memproses webhook. Lihat log untuk detail.")
+
+    except Exception as e:
+        frappe.logger("webhook").critical(f"Kesalahan umum pada sync_webhook: {str(e)}")
+        frappe.throw("Gagal menjalankan sinkronisasi webhook. Silakan periksa konfigurasi API Token dan Signature Secret.")
+
 
 def get_webhook_history(host, headers, from_time, to_time):
     """
@@ -325,7 +348,7 @@ def get_webhook_history(host, headers, from_time, to_time):
                                                               "to": to_time,
                                                               "databaseId": 1685462})
     
-    log_error( from_time + " " + to_time + "" + str(headers) + "" + str(response.text), "test")
+    #log_error( from_time + " " + to_time + "" + str(headers) + "" + str(response.text), "test")
     if response.status_code != 200:
         frappe.throw(f"Failed to fetch webhook history: {response.text}")
 
