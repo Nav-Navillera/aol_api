@@ -13,6 +13,10 @@ import traceback
 from datetime import datetime, timezone, timedelta
 from frappe.utils import get_site_path, now_datetime, add_to_date
 
+
+frappe.init(site="navi")
+frappe.connect()
+
 def get_webhook_sync_ranges():
     """Membuat rentang waktu untuk sinkronisasi histori webhook dari jam 00:00:00 ke 23:59:59"""
     site_config_path = get_site_path("site_config.json")
@@ -63,6 +67,7 @@ def generate_webhook_hash(uuid, timestamp):
     """Buat hash unik 16 karakter dari SHA-1."""
     return hashlib.sha1(f"{uuid}|{timestamp}".encode()).hexdigest()[:21]
 
+@frappe.whitelist()
 def generate_headers(api_token, signature_secret):
     """
     Membuat header yang dibutuhkan untuk autentikasi API Accurate Online.
@@ -94,6 +99,7 @@ def generate_headers(api_token, signature_secret):
 
     return headers
 
+@frappe.whitelist()
 def get_host_from_api_token(headers):
     """
     Mendapatkan host dari API Token.
@@ -126,6 +132,7 @@ def get_host_from_api_token(headers):
     host = "https://public.accurate.id/"
     return host
 
+@frappe.whitelist()
 def get_api_token():
     # Ambil API Token & Signature dari Doctype "AOL API Settings"
     settings = frappe.get_doc("AOL API Settings")
@@ -144,53 +151,64 @@ def save_webhook_response(json_data):
     Returns:
         None
     """
+    try:
+        # Pastikan JSON memiliki elemen
+        if not json_data:
+            frappe.logger("webhook").error("JSON data kosong atau tidak valid")
+            return
+
+        # Ambil nilai dari elemen pertama JSON
+        first_entry = json_data
+        database_id = first_entry.get("databaseId")
+        document_type = first_entry.get("type")
+        
+        timestamp_dt = datetime.strptime(first_entry["timestamp"], "%d/%m/%Y %H:%M:%S")
+        send_timestamp = timestamp_dt.strftime("%Y/%m/%d %H:%M:%S")
+        
+        uuid = first_entry.get("uuid")
+
+        # Pastikan key 'data' ada dan tidak kosong
+        if "data" not in first_entry or not first_entry["data"]:
+            frappe.logger("webhook").error("Data sales order tidak ditemukan")
+            return
+
+        # Ambil elemen pertama dari 'data'
+        sales_data = first_entry["data"][0]
+        row_id = sales_data.get("salesOrderId")
+        action = sales_data.get("action")
+        
+        hash_code = generate_webhook_hash(uuid, send_timestamp)
+
+        # Cek apakah data dengan hash_code sudah ada
+        if frappe.db.exists("AOL Webhook Responses", {"hash_code": hash_code}):
+            frappe.logger("webhook").error(f"Dokumen duplikat terdeteksi untuk hash_code: {hash_code}")
+            return
+
+        # Simpan ke Doctype 'AOL Webhook Responses'
+        new_response = frappe.get_doc({
+            "doctype": "AOL Webhook Responses",
+            "payload": json_data,  # Simpan JSON mentah sebagai log
+            "uuid": uuid,
+            "document_type": document_type,
+            "database_id": database_id,
+            "row_id": row_id,
+            "action": action,
+            "timestamp": send_timestamp,
+            "hash_code": hash_code
+        })
+
+        # Masukkan ke database
+        new_response.insert(ignore_permissions=True)
+        frappe.db.commit()
+
+        # Perbarui waktu terakhir sinkronisasi webhook
+        webhook_last_sync_time(send_timestamp)
     
-    # Pastikan JSON memiliki elemen
-    if not json_data:
-        log_error("JSON data kosong atau tidak valid", "Format Error")
-        return
-
-    # Ambil nilai dari elemen pertama JSON
-    first_entry = json_data
-    database_id = first_entry.get("databaseId")
-    document_type = first_entry.get("type")
-    
-    timestamp_dt = datetime.strptime(first_entry["timestamp"], "%d/%m/%Y %H:%M:%S")
-    send_timestamp = timestamp_dt.strftime("%Y/%m/%d %H:%M:%S")
-    
-    uuid = first_entry.get("uuid")
-
-    # Pastikan key 'data' ada dan tidak kosong
-    if "data" not in first_entry or not first_entry["data"]:
-        log_error("Data sales order tidak ditemukan", "Format Error")
-        return
-
-    # Ambil elemen pertama dari 'data'
-    sales_data = first_entry["data"][0]
-    row_id = sales_data.get("salesOrderId")
-    action = sales_data.get("action")
-    
-    hash_code = generate_webhook_hash(uuid, send_timestamp)
-
-    # Simpan ke Doctype 'AOL Webhook Responses'
-    new_response = frappe.get_doc({
-        "doctype": "AOL Webhook Responses",
-        "payload": json_data,  # Simpan JSON mentah sebagai log
-        "uuid": uuid,
-        "document_type": document_type,
-        "database_id": database_id,
-        "row_id": row_id,
-        "action": action,
-        "timestamp": send_timestamp,
-        "hash": hash_code
-    })
-
-    # Masukkan ke database
-    new_response.insert(ignore_permissions=True)
-    frappe.db.commit()
-
-    # Perbarui waktu terakhir sinkronisasi webhook
-    webhook_last_sync_time(send_timestamp)
+    except frappe.DuplicateEntryError:
+        pass
+        #frappe.logger("webhook").error(f"Duplicate entry error untuk hash_code: {hash_code}")
+    except Exception as e:
+        frappe.logger("webhook").error(f"Kesalahan saat menyimpan webhook response: {str(e)}")
 
 @frappe.whitelist(allow_guest=True)
 def receiver():
@@ -233,7 +251,7 @@ def receiver():
             "message": str(e)
         }
 
-
+@frappe.whitelist()
 def log_error(error, title="Application Error"):
     """
     Mencatat error ke dalam Doctype Error Log di Frappe.
@@ -258,6 +276,7 @@ def log_error(error, title="Application Error"):
         # Jika gagal mencatat error, cetak ke log sistem
         frappe.logger().error(f"Failed to log error: {str(e)}")
    
+@frappe.whitelist()   
 def process_webhook_sync(host, headers):
     """
     Loop setiap rentang waktu dan panggil get_webhook_history.
@@ -274,34 +293,43 @@ def process_webhook_sync(host, headers):
             # Ambil histori webhook dari API
             response = get_webhook_history(host, headers, from_time=from_time, to_time=to_time)
 
-            if not response or "d" not in response:
-                frappe.throw(f"Tidak ada data webhook dalam rentang {from_time} - {to_time}")
+            if len(response["d"]) == 0:
+                frappe.msgprint(f"Tidak ada data webhook dalam rentang {from_time} - {to_time}")
                 continue
 
             # Loop setiap payload yang diterima
             for entry in response["d"]:
                 for payload in entry.get("payload", []):
-                    frappe.logger("webhook").info(payload)
+                    hash_code = ""
+                    exists = ""
                     try:
-                        # Buat hash unik untuk payload
-                        hash_code = generate_webhook_hash(payload["uuid"], payload["timestamp"])
+                        # Buat hash unik untuk 
                         
-                        # Cek apakah hash sudah ada di Doctype
-                        if not frappe.db.exists("AOL Webhook Responses", {"hash": hash_code}):
-                            # Simpan data jika hash belum ada
-                            save_webhook_response(payload)
-                            frappe.logger("webhook").info(f"Webhook baru disimpan, hash: {hash_code}")
-                            new_data_counter += 1
-                        else:
-                            frappe.logger("webhook").info(f"Webhook duplikat ditemukan, lewati hash: {hash_code}")
-
+                        timestamp_dt = datetime.strptime(payload["timestamp"], "%d/%m/%Y %H:%M:%S")
+                        send_timestamp = timestamp_dt.strftime("%Y/%m/%d %H:%M:%S")
+                        hash_code = generate_webhook_hash(payload["uuid"], send_timestamp)
+                        try:
+                            # Cek apakah hash sudah ada di Doctype
+                            #exists = frappe.get_doc("AOL Webhook Responses", hash_code)
+                            exists = frappe.db.get_values("AOL Webhook Responses", {"hash_code": hash_code})
+                            
+                            if len(exists) < 1:
+                                # Simpan data jika hash belum ada
+                                save_webhook_response(payload)
+                                new_data_counter += 1
+                        
+                                frappe.log_error(f"Debug Exists: {exists} data count {new_data_counter}", f"Webhook Debugging \n hash {hash_code} type {type(exists)} len {len(exists)} \n {payload}")
+                                
+                        except Exception as e:
+                            frappe.logger("webhook").info(f"Error Debugging Exists: {str(e)}", "Webhook Debugging Error")
+                            
                     except Exception as e:
                         frappe.logger("webhook").error(f"Kesalahan saat memproses payload: {str(e)}")
 
             return new_data_counter
         except Exception as e:
             frappe.logger("webhook").critical(f"Gagal mengambil histori webhook dari {from_time} - {to_time}: {str(e)}")
-            frappe.throw(f"Gagal mengambil histori webhook dari {from_time} - {to_time}: {str(e)}")
+            frappe.msgprint(f"Gagal mengambil histori webhook dari {from_time} - {to_time}: {str(e)}")
             
 @frappe.whitelist()
 def sync_webhook():
@@ -327,10 +355,12 @@ def sync_webhook():
             data_counter = process_webhook_sync(host, headers)
             
             # frappe.throw(f"""Selesai, didapat {data_counter} baris history""")
-
+        
+            webhook_last_sync_time(frappe.utils.now_datetime)
+        
         except Exception as e:
             frappe.logger("webhook").error(f"Gagal memproses webhook: {str(e)}")
-            frappe.throw("Terjadi kesalahan saat memproses webhook. Lihat log untuk detail.")
+            # frappe.throw("Terjadi kesalahan saat memproses webhook. Lihat log untuk detail.")
 
     except Exception as e:
         frappe.logger("webhook").critical(f"Kesalahan umum pada sync_webhook: {str(e)}")
@@ -345,8 +375,7 @@ def get_webhook_history(host, headers, from_time, to_time):
     api_url = f"{host}api/webhook-history.do"
 
     response = requests.get(api_url, headers=headers, params={"from": from_time,
-                                                              "to": to_time,
-                                                              "databaseId": 1685462})
+                                                              "to": to_time})
     
     #log_error( from_time + " " + to_time + "" + str(headers) + "" + str(response.text), "test")
     if response.status_code != 200:

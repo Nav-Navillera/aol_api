@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "field:hash",
+ "autoname": "field:hash_code",
  "creation": "2025-02-11 07:24:16.520361",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -16,9 +16,13 @@
   "section_break_myct",
   "trigger_method",
   "status",
-  "hash",
+  "hash_code",
   "column_break_ewzm",
-  "payload"
+  "payload",
+  "section_break_xbfy",
+  "data2",
+  "column_break_zcen",
+  "data_2_copy"
  ],
  "fields": [
   {
@@ -99,15 +103,33 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "hash",
+   "fieldname": "hash_code",
    "fieldtype": "Data",
    "label": "Hash",
    "unique": 1
+  },
+  {
+   "fieldname": "column_break_zcen",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_xbfy",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "data2",
+   "fieldtype": "JSON",
+   "label": "Data 2"
+  },
+  {
+   "fieldname": "data_2_copy",
+   "fieldtype": "JSON",
+   "label": "Data 2 Copy"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-02-12 03:25:53.192570",
+ "modified": "2025-02-13 00:12:04.066407",
  "modified_by": "Administrator",
  "module": "AOL API Integration",
  "name": "AOL Webhook Responses",
