@@ -143,9 +143,9 @@ scheduler_events = {
  	"hourly": [
  		"aol_api.webhook.sync_webhook"
  	],
-# 	"weekly": [
-# 		"aol_api.tasks.weekly"
-# 	],
+ 	"weekly": [
+ 		"aol_api.webhook.renew_webhook_subcription"
+ 	],
 # 	"monthly": [
 # 		"aol_api.tasks.monthly"
 # 	],

@@ -9,7 +9,9 @@ import hashlib
 import base64
 
 import traceback
-
+import re
+import time
+from functools import lru_cache
 from datetime import datetime, timezone, timedelta
 from frappe.utils import get_site_path, now_datetime, add_to_date
 
@@ -67,7 +69,6 @@ def generate_webhook_hash(uuid, timestamp):
     """Buat hash unik 16 karakter dari SHA-1."""
     return hashlib.sha1(f"{uuid}|{timestamp}".encode()).hexdigest()[:21]
 
-@frappe.whitelist()
 def generate_headers(api_token, signature_secret):
     """
     Membuat header yang dibutuhkan untuk autentikasi API Accurate Online.
@@ -99,7 +100,6 @@ def generate_headers(api_token, signature_secret):
 
     return headers
 
-@frappe.whitelist()
 def get_host_from_api_token(headers):
     """
     Mendapatkan host dari API Token.
@@ -132,7 +132,6 @@ def get_host_from_api_token(headers):
     host = "https://public.accurate.id/"
     return host
 
-@frappe.whitelist()
 def get_api_token():
     # Ambil API Token & Signature dari Doctype "AOL API Settings"
     settings = frappe.get_doc("AOL API Settings")
@@ -143,7 +142,9 @@ def get_api_token():
 
 def save_webhook_response(json_data):
     """
-    Menyimpan data webhook ke dalam Doctype 'AOL Webhook Responses'.
+    Menyimpan data webhook ke dalam Doctype 'AOL Webhook Responses'. 
+    dengan meminta terlebih dahulu details data yang diberikan webhook accurate pada
+    fungsi receiver
 
     Args:
         json_data (list): Data webhook dalam bentuk JSON list yang berisi payload.
@@ -152,8 +153,22 @@ def save_webhook_response(json_data):
         None
     """
     try:
-        # Pastikan JSON memiliki elemen
-        if not json_data:
+        
+        # Pastikan payload dalam bentuk string sebelum diparsing
+        if isinstance(json_data, str):
+            payload = json.loads(json_data)
+
+        # Jika payload adalah list, pastikan tidak kosong dan ambil elemen pertama
+        if isinstance(json_data, list):
+            if not json_data:
+                frappe.throw("Webhook data kosong, tidak ada elemen dalam array.")
+            parsed_data = json_data[0]  # Ambil elemen pertama dari list
+        elif isinstance(json_data, dict):
+            parsed_data = json_data  # Langsung gunakan jika sudah dictionary
+        else:
+            frappe.throw(f"Format webhook data tidak valid: {json_data} {type(json_data)}")
+        
+        if not parsed_data:
             frappe.logger("webhook").error("JSON data kosong atau tidak valid")
             return
 
@@ -203,6 +218,9 @@ def save_webhook_response(json_data):
 
         # Perbarui waktu terakhir sinkronisasi webhook
         webhook_last_sync_time(send_timestamp)
+        
+        #frappe.log_error(f"Debug Exists: {json_data} data count {parsed_data}", "Webhook Debugging ")
+                            
     
     except frappe.DuplicateEntryError:
         pass
@@ -276,7 +294,7 @@ def log_error(error, title="Application Error"):
         # Jika gagal mencatat error, cetak ke log sistem
         frappe.logger().error(f"Failed to log error: {str(e)}")
    
-@frappe.whitelist()   
+@frappe.whitelist() 
 def process_webhook_sync(host, headers):
     """
     Loop setiap rentang waktu dan panggil get_webhook_history.
@@ -284,8 +302,8 @@ def process_webhook_sync(host, headers):
     """
     sync_ranges = get_webhook_sync_ranges()
     new_data_counter = 0
+
     for start_time, end_time in sync_ranges:
-        # Format datetime sesuai "DD/MM/YYYY HH:MM:SS"
         from_time = start_time.strftime("%d/%m/%Y %H:%M:%S")
         to_time = end_time.strftime("%d/%m/%Y %H:%M:%S")
 
@@ -293,44 +311,61 @@ def process_webhook_sync(host, headers):
             # Ambil histori webhook dari API
             response = get_webhook_history(host, headers, from_time=from_time, to_time=to_time)
 
-            if len(response["d"]) == 0:
-                frappe.msgprint(f"Tidak ada data webhook dalam rentang {from_time} - {to_time}")
+            # Debugging: Log isi response
+            frappe.logger("webhook").info(f"Webhook Response Debug: {response}")
+
+            # Pastikan response valid dan memiliki kunci 's'
+            if not isinstance(response, dict) or "s" not in response:
+                frappe.logger("webhook").error(f"Format respons tidak valid: {response}")
+                frappe.msgprint(f"Format respons tidak valid, cek log untuk detail.")
+                continue
+
+            # Jika 's' False, log error dan tampilkan pesan
+            if not response["s"]:
+                frappe.logger("webhook").warning(f"Webhook request gagal: {response.get('d', 'Tidak ada detail')}")
+                frappe.msgprint(f"Webhook gagal: {response.get('d', 'Tidak ada detail')}")
+                continue
+
+            # Pastikan "d" adalah list sebelum diproses
+            if not isinstance(response.get("d"), list) or len(response["d"]) == 0:
+                frappe.msgprint(f"Tidak ada pembaruan data dalam rentang {from_time} - {to_time}")
                 continue
 
             # Loop setiap payload yang diterima
             for entry in response["d"]:
+                if not isinstance(entry, dict) or "payload" not in entry:
+                    frappe.logger("webhook").warning(f"Format entry tidak valid: {entry}")
+                    continue
+
                 for payload in entry.get("payload", []):
-                    hash_code = ""
-                    exists = ""
                     try:
-                        # Buat hash unik untuk 
-                        
                         timestamp_dt = datetime.strptime(payload["timestamp"], "%d/%m/%Y %H:%M:%S")
                         send_timestamp = timestamp_dt.strftime("%Y/%m/%d %H:%M:%S")
                         hash_code = generate_webhook_hash(payload["uuid"], send_timestamp)
+
+                        payload_data = payload.get("data", {})
+
                         try:
-                            # Cek apakah hash sudah ada di Doctype
-                            #exists = frappe.get_doc("AOL Webhook Responses", hash_code)
-                            exists = frappe.db.get_values("AOL Webhook Responses", {"hash_code": hash_code})
-                            
-                            if len(exists) < 1:
-                                # Simpan data jika hash belum ada
+                            exists = frappe.db.exists("AOL Webhook Responses", {"hash_code": hash_code})
+
+                            if not exists:
                                 save_webhook_response(payload)
                                 new_data_counter += 1
-                        
-                                frappe.log_error(f"Debug Exists: {exists} data count {new_data_counter}", f"Webhook Debugging \n hash {hash_code} type {type(exists)} len {len(exists)} \n {payload}")
-                                
+
+                            frappe.logger("webhook").info(f"Processed webhook: {hash_code}, Exists: {exists}")
+
                         except Exception as e:
-                            frappe.logger("webhook").info(f"Error Debugging Exists: {str(e)}", "Webhook Debugging Error")
-                            
+                            frappe.logger("webhook").error(f"Error saat memeriksa hash: {str(e)}")
+
                     except Exception as e:
                         frappe.logger("webhook").error(f"Kesalahan saat memproses payload: {str(e)}")
 
-            return new_data_counter
         except Exception as e:
             frappe.logger("webhook").critical(f"Gagal mengambil histori webhook dari {from_time} - {to_time}: {str(e)}")
             frappe.msgprint(f"Gagal mengambil histori webhook dari {from_time} - {to_time}: {str(e)}")
-            
+
+    return new_data_counter
+
 @frappe.whitelist()
 def sync_webhook():
     """
@@ -355,8 +390,6 @@ def sync_webhook():
             data_counter = process_webhook_sync(host, headers)
             
             # frappe.throw(f"""Selesai, didapat {data_counter} baris history""")
-        
-            webhook_last_sync_time(frappe.utils.now_datetime)
         
         except Exception as e:
             frappe.logger("webhook").error(f"Gagal memproses webhook: {str(e)}")
@@ -421,3 +454,330 @@ def webhook_last_sync_time(new_timestamp: str):
     except Exception as e:
         frappe.logger().error(f"Error update last sync time: {str(e)}")
         return False
+
+@frappe.whitelist()
+def renew_webhook_subcription():
+    """
+    Mengambil detail dokumen dari Accurate Online.
+    """
+    try:
+        
+        headers = get_headers_with_cache()
+        host = "https://account.accurate.id"
+        
+        api_url = f"{host}/api/webhook-renew.do"
+        response = requests.get(api_url, headers=headers, params={})
+        response.raise_for_status()
+
+    except requests.RequestException as e:
+        frappe.throw(f"Gagal mengakses db {database_id} dari Accurate API: {str(e)}")
+        
+@frappe.whitelist()
+def generate_o2c(data_id):
+    try:
+        def safe_json_loads(data):
+            return json.loads(data) if isinstance(data, str) else data
+
+        # Ambil data dari Accurate Online
+        so_data = safe_json_loads(fetch_aol_data(generate_so_payload_from_data(data_id)))
+        pre_sq_data = generate_sq_payload_from_data(so_data)
+        sq_data = safe_json_loads(fetch_aol_data(pre_sq_data))
+
+        doc_id = so_data.get("d", {}).get("number", "")
+        if not doc_id:
+            frappe.throw("Sales Order Number tidak ditemukan, tidak dapat membuat Sales Pipeline Control.")
+
+        existing_doc = frappe.get_doc("Sales Pipeline Control", {"doc_id": doc_id}) if frappe.db.exists("Sales Pipeline Control", {"doc_id": doc_id}) else None
+
+        cbd_items, sq_items = [], []
+        total_cbd_amount, total_sq_price, total_discount, total_sq_amount = 0, 0, 0, 0
+
+        for item in so_data.get("d", {}).get("detailItem", []):
+            quantity, cost_per_uom = item.get("quantity", 0), item.get("numericField6", 0)
+            item_price_per_uom, discount = item.get("unitPrice", 0), item.get("itemCashDiscount", 0)
+            sq_item_amount = quantity * item_price_per_uom
+            total_price = quantity * cost_per_uom
+
+            cbd_items.append({
+                "job_name": item.get("detailName", ""),
+                "quantity": quantity,
+                "uom": item.get("itemUnit", {}).get("name", ""),
+                "cost_per_uom": cost_per_uom,
+                "amount": total_price
+            })
+
+            sq_items.append({
+                "job_name": item.get("detailName", ""),
+                "quantity": quantity,
+                "uom": item.get("itemUnit", {}).get("name", ""),
+                "item_price_per_uom": item_price_per_uom,
+                "_discount": discount / sq_item_amount if sq_item_amount else 0,
+                "discount": discount,
+                "sq_item_amount": sq_item_amount
+            })
+
+            total_cbd_amount += total_price
+            total_sq_price += sq_item_amount
+            total_discount += discount
+            total_sq_amount += sq_item_amount
+
+        discount_percentage = (total_discount / total_sq_price) * 100 if total_sq_price else 0
+        profit_amount = total_sq_price - total_cbd_amount
+        sq_final_amount = total_sq_price - total_discount
+        gross_margin = sq_final_amount - total_cbd_amount
+        p_gross_margin = (gross_margin / total_cbd_amount) * 100 if total_cbd_amount else 100
+        fee_customer = so_data["d"].get("numericField4", 0)
+        p_fee_customer = (fee_customer / gross_margin) * 100 if gross_margin else 0
+        p_nett_margin = ((gross_margin - fee_customer) / total_cbd_amount) * 100 if total_cbd_amount else 100
+        nett_margin = gross_margin - fee_customer
+
+        doc = existing_doc or frappe.get_doc({"doctype": "Sales Pipeline Control"})
+
+        fields = {
+            "data_id": data_id,
+            "doc_id": doc_id,
+            "status": so_data.get("d", {}).get("statusName", ""),
+            "term_of_payment": so_data.get("d", {}).get("paymentTerm", {}).get("netDays", ""),
+            "customer_name": so_data.get("d", {}).get("customer", {}).get("name", ""),
+            "sales_name": so_data.get("d", {}).get("charField9", ""),
+            "cbd_id": sq_data.get("d", {}).get("charField8", ""),
+            "description": so_data.get("d", {}).get("description", ""),
+            "quantity": "1",
+            "uom": "Set",
+            "unit_price": total_cbd_amount,
+            "cbd_amount": total_cbd_amount,
+            "sq_number": sq_data.get("d", {}).get("number", ""),
+            "sq_release_date": convert_date_format(sq_data.get("d", {}).get("transDate", "")),
+            "sq_price": total_sq_price,
+            "discount_amount": total_discount,
+            "discount": discount_percentage,
+            "profit_amount": profit_amount,
+            "_profit": (profit_amount / total_cbd_amount) * 100 if total_cbd_amount else 0,
+            "sq_final_amount": sq_final_amount,
+            "gross_margin": gross_margin,
+            "p_gross_margin": p_gross_margin,
+            "sales_order_id": doc_id,
+            "po_number": so_data.get("d", {}).get("poNumber", ""),
+            "so_release_date": convert_date_format(so_data.get("d", {}).get("transDate", "")),
+            "fee_customer": fee_customer,
+            "p_fee_customer": p_fee_customer,
+            "nett_margin": nett_margin
+        }
+
+        for key, value in fields.items():
+            setattr(doc, key, value)
+
+        if existing_doc:
+            doc.set("cbd_items", [])
+            doc.set("sq_items", [])
+
+        for item in cbd_items:
+            doc.append("cbd_items", item)
+        for item in sq_items:
+            doc.append("sq_items", item)
+
+        doc.save()
+        frappe.msgprint(f"Sales Pipeline Control {doc_id} {'diperbarui' if existing_doc else 'dibuat'}.")
+
+    except Exception as e:
+        frappe.log_error(f"Error dalam generate_o2c: {str(e)}", "generate_o2c")
+        frappe.throw(f"Terjadi kesalahan dalam proses generate_o2c: {str(e)}")
+        
+def generate_so_payload_from_data(data_id):
+    try:
+        
+        return {
+            "type": "SALES_ORDER",
+            "data": [{"salesOrderId": data_id}]
+        }
+
+    except (KeyError, IndexError, TypeError):
+        frappe.log_error(frappe.get_traceback() + f"data: {debug_data}" , "Error generate_sq_payload_from_data")
+        return None
+
+def generate_sq_payload_from_data(data):
+    """
+    Menghasilkan payload sales quotation dari data webhook.
+    """
+    try:
+        if isinstance(data, str):
+            data = json.loads(data)
+
+        if not isinstance(data, dict) or "d" not in data:
+            frappe.throw("Format data tidak valid dalam generate_sq_payload_from_data.")
+
+        debug_data = data["d"]
+        
+        sales_quotation_id = data["d"]["detailItem"][0]["salesQuotation"]["id"]
+        
+
+        return {
+            "type": "SALES_QUOTATION",
+            "data": [{"salesQuotationId": sales_quotation_id}]
+        }
+
+    except (KeyError, IndexError, TypeError):
+        frappe.log_error(frappe.get_traceback() + f"data: {debug_data}" , "Error generate_sq_payload_from_data")
+        return None  
+
+def fetch_aol_data(payload):
+    """
+    Mengambil data dari Accurate Online berdasarkan payload webhook.
+    """
+    try:
+        # Pastikan payload dalam bentuk dictionary atau list
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)  # Parsing hanya sekali
+            except json.JSONDecodeError:
+                frappe.throw("Format webhook tidak valid: payload bukan JSON yang benar.")
+
+        if isinstance(payload, list):  
+            if not payload:  
+                frappe.throw("Format webhook tidak valid: list kosong.")  
+            first_entry = payload[0]  # Ambil elemen pertama jika list
+        elif isinstance(payload, dict):  
+            first_entry = payload  # Langsung gunakan jika dictionary
+        else:  
+            frappe.throw(f"Format webhook tidak valid: tipe data {type(payload)} tidak didukung.")
+
+        # Pastikan first_entry adalah dictionary
+        if not isinstance(first_entry, dict):
+            frappe.throw(f"Format webhook tidak valid: data harus berupa dictionary. Tipe: {type(first_entry)}")
+
+        database_id = first_entry.get("databaseId", None) 
+
+        # Ambil nilai "type"
+        document_type = first_entry.get("type", None)
+
+        # Ambil data pertama dari "data" jika ada
+        data_list = first_entry.get("data")
+        if isinstance(data_list, list) and data_list:
+            data_id = data_list[0].get(get_data_id_key(document_type), None)
+        elif isinstance(data_list, dict):  # Jika data adalah dictionary langsung
+            data_id = data_list.get(get_data_id_key(document_type), None)
+        else:
+            data_id = None
+        
+        frappe.log_error("fetch_aol_data", f"data: {data_id} type: {document_type}")
+
+        if not data_id:
+            frappe.throw(f"ID tidak ditemukan untuk dokumen '{document_type}'.")
+        
+        headers = get_headers_with_cache()
+        host = "https://public.accurate.id"  # Tidak perlu mengambil dari cache karena sudah pasti
+        
+        # access_aol_db(host="https://account.accurate.id", headers=headers, database_id=database_id)
+    
+        return get_data_details(host, headers, data_id, document_type)
+
+    except json.JSONDecodeError:
+        frappe.throw("Payload tidak valid, gagal memparse JSON.")
+    except requests.RequestException as e:
+        frappe.throw(f"Terjadi kesalahan saat mengambil data dari Accurate API: {str(e)}")
+    except Exception as e:
+        frappe.throw(f"Error handling webhook: {str(e)}")
+
+@staticmethod
+def get_data_id_key(document_type):
+    """
+    Mendapatkan key ID berdasarkan tipe dokumen.
+    """
+    return {
+        "SALES_ORDER": "salesOrderId",
+        "SALES_QUOTATION": "salesQuotationId"
+    }.get(document_type, "")
+    
+def get_headers_with_cache():
+    """
+    Mengambil header dari cache jika masih berlaku (kurang dari 5 menit),
+    atau membuat header baru jika sudah expired.
+    """
+    cache_key = "aol_api_headers"
+    cached_data = frappe.cache().get_value(cache_key)
+
+    if cached_data:
+        cached_data = json.loads(cached_data)  # Konversi dari string ke dict
+        cached_time = cached_data.get("timestamp", 0)
+        if time.time() - cached_time < 300:  # 5 menit
+            return cached_data["headers"]
+
+    # Generate header baru karena cache kadaluarsa
+    new_headers = get_new_headers()
+    frappe.cache().set_value(cache_key, json.dumps({"headers": new_headers, "timestamp": time.time()}))
+    return new_headers
+
+def get_new_headers():
+    """
+    Menghasilkan header autentikasi API Accurate Online (cache untuk optimasi).
+    """
+    try:
+        settings = frappe.get_doc("AOL API Settings")
+        api_token = settings.api_token
+        signature_secret = settings.signature_secret
+
+        if not api_token or not signature_secret:
+            frappe.throw("API Token atau Signature Secret belum diatur.")
+
+        jakarta_timezone = timezone(timedelta(hours=7))
+        timestamp_text = datetime.now(jakarta_timezone).strftime("%d/%m/%Y %H:%M:%S")
+
+        signature = hmac.new(
+            key=signature_secret.encode(),
+            msg=str(timestamp_text).encode(),
+            digestmod=hashlib.sha256
+        ).digest()
+
+        return {
+            "Authorization": f"Bearer {api_token}",
+            "X-Api-Timestamp": timestamp_text,
+            "X-Api-Signature": base64.b64encode(signature).decode(),
+            "Content-Type": "application/json"
+        }
+
+    except Exception:
+        frappe.throw("Gagal membuat headers API.")
+
+def get_data_details(host, headers, data_id, data_type):
+    """
+    Mengambil detail dokumen dari Accurate Online.
+    """
+    try:
+        api_url = f"{host}/accurate/api/{get_data_url(data_type)}/detail.do"
+        response = requests.get(api_url, headers=headers, params={"id": data_id})
+        response.raise_for_status()
+
+        return response.json()
+
+    except requests.RequestException as e:
+        frappe.throw(f"Gagal mengambil detail dokumen dari Accurate API: {str(e)}")
+        
+def access_aol_db(host, headers, database_id):
+    """
+    Mengambil detail dokumen dari Accurate Online.
+    """
+    try:
+        api_url = f"{host}/api/open-db.do"
+        response = requests.get(api_url, headers=headers, params={"id": database_id})
+        response.raise_for_status()
+
+    except requests.RequestException as e:
+        frappe.throw(f"Gagal mengakses db {database_id} dari Accurate API: {str(e)}")
+
+@staticmethod
+def get_data_url(document_type):
+    """
+    Mendapatkan endpoint URL berdasarkan tipe dokumen.
+    """
+    return {
+        "SALES_ORDER": "sales-order",
+        "SALES_QUOTATION": "sales-quotation"
+    }.get(document_type, "")
+
+@staticmethod
+def convert_date_format(date_str):
+    """Mengonversi tanggal dari format dd/MM/yyyy ke format yyyy-MM-dd yang diterima oleh Frappe."""
+    try:
+        return datetime.strptime(date_str, "%d/%m/%Y").strftime("%Y-%m-%d")
+    except ValueError:
+        frappe.throw(f"Format tanggal tidak valid: {date_str}")
